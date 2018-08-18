@@ -15,7 +15,7 @@ def build_vocab(text):
         text = text.replace(key, ' {} '.format(token)).strip()
     while '  ' in text:
         text = text.replace('  ', ' ')
-    pat_alphabetic = re.compile('(([\d\w\<\>\_])+)')
+    pat_alphabetic = re.compile('(([\d\w\<\>\_\:])+)')
     tokens = [match.group() for match in pat_alphabetic.finditer(text)]
     vocab = {token: True for token in tokens}
     vocab = list(vocab)
@@ -30,7 +30,6 @@ def token_lookup():
     :return: Tokenize dictionary where the key is the punctuation and the value is the token
     """
     return {';': "<semicolon>",
-            ':': "<colon>",
             "'": "<inverted_comma>",
             '"': "<quotation_mark>",
             ',': "<comma>",
@@ -56,16 +55,15 @@ def preprocess(data_path):
     :return: text sequences converted to integer sequence
     """
     with open(data_path, "r") as in_file:
-        text = in_file.read()
-    tokens, word2idx, idx2word = build_vocab(text)
-    text_seq = [word2idx[word] for word in tokens]
-    # for i, t in enumerate(tokens):
-    #     print(word2idx[t], tokens[i])
-    # quit()
-    data = {'word2idx': word2idx, 'idx2word': idx2word}
-    pickle.dump(data, open('preprocessed_data.pkl', 'wb'))
-    print("\nWordMap successfully stored as preprocessed_data.pkl")
-    return text_seq
+        text = in_file.readlines()
+    for t in text:
+        print(t)
+    # tokens, word2idx, idx2word = build_vocab(text)
+    # text_seq = [word2idx[word] for word in tokens]
+    # data = {'word2idx': word2idx, 'idx2word': idx2word}
+    # pickle.dump(data, open('preprocessed_data.pkl', 'wb'))
+    # print("\nWordMap successfully stored as preprocessed_data.pkl")
+    # return text_seq
 
 
 def load_data(data_path):

@@ -7,12 +7,14 @@ class TranscriptNet:
     def __init__(self, config):
         self.config = config
         self.word2idx, self.idx2word = utils.load_data('preprocessed_data.pkl')
-        self.vocab_size = len(self.word2idx)
+        self.vocab_size = len(self.word2idx) + 1
         self._build_model()
 
     def _build_model(self):
 
         with tf.variable_scope('TranscriptNet'):
+            if self.config.mode in 'test':
+                self.config.batch_size = 1
 
             input_text = tf.placeholder(tf.int32, [None, None], name='input')
             targets = tf.placeholder(tf.int32, [None, None], name='targets')
@@ -24,9 +26,9 @@ class TranscriptNet:
 
             lstm = tf.contrib.rnn.BasicLSTMCell(self.config.lstm_size)
 
-            # drop = tf.contrib.rnn.DropoutWrapper(lstm, output_keep_prob=keep_prob)
+            drop = tf.contrib.rnn.DropoutWrapper(lstm, output_keep_prob=keep_prob)
 
-            cell = tf.contrib.rnn.MultiRNNCell([lstm] * self.config.lstm_layers)
+            cell = tf.contrib.rnn.MultiRNNCell([drop] * self.config.lstm_layers)
 
             initial_state = cell.zero_state(self.config.batch_size, tf.float32)
             initial_state_named = tf.identity(initial_state, name="initial_state")
@@ -44,6 +46,7 @@ class TranscriptNet:
                               'keep_prob': keep_prob,
                               'initial_state': initial_state_named,
                               'final_state': final_state_named,
+                              'predictions': predictions,
                               'probabilities': probabilities
                               }
 
@@ -71,12 +74,12 @@ class TranscriptNet:
         Builds the cost function and optimizer and trains the model on the training data
         """
 
-        cost = tf.contrib.seq2seq.sequence_loss(self.feed_dict['probabilities'],
+        cost = tf.contrib.seq2seq.sequence_loss(self.feed_dict['predictions'],
                                                 self.feed_dict['targets'],
                                                 tf.ones([self.config.batch_size,
                                                          tf.shape(self.feed_dict['input_text'])[1]]))
 
-        optimizer = tf.train.AdamOptimizer(self.config.learning_rate)
+        optimizer = tf.train.AdamOptimizer(self.feed_dict['learning_rate'])
 
         gradients = optimizer.compute_gradients(cost)
         capped_gradients = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gradients if grad is not None]
@@ -95,11 +98,10 @@ class TranscriptNet:
                             self.feed_dict['targets']: y,
                             self.feed_dict['initial_state']: state,
                             self.feed_dict['learning_rate']: self.config.learning_rate,
-                            self.feed_dict['keep_prob']: 0.3
+                            self.feed_dict['keep_prob']: 0.5
                             }
                     train_loss, state, _ = sess.run([cost, self.feed_dict['final_state'], train_op], feed)
 
-                    # if (epoch * len(batches) + batch) % 10 == 0:
                     print('Epoch {}: Step {:>4}/{}   train_loss = {:.3f}'.format(
                         epoch,
                         batch,
@@ -111,42 +113,28 @@ class TranscriptNet:
             saver.save(sess, self.config.train_dir)
             print('Model Trained and Saved')
 
-    def get_tensors(self, loaded_graph):
-        """
-        Get input, initial state, final state, and probabilities tensor from <loaded_graph>
-        :param loaded_graph: TensorFlow graph loaded from file
-        :return: Tuple (InputTensor, InitialStateTensor, FinalStateTensor, ProbsTensor)
-        """
-        input_tensor = loaded_graph.get_tensor_by_name("TranscriptNet/input:0")
-        initial_state_tensor = loaded_graph.get_tensor_by_name("TranscriptNet/initial_state:0")
-        final_state_tensor = loaded_graph.get_tensor_by_name("TranscriptNet/final_state:0")
-        probs_tensor = loaded_graph.get_tensor_by_name("TranscriptNet/probabilities:0")
-        return input_tensor, initial_state_tensor, final_state_tensor, probs_tensor
-
     def pick_word(self, probabilities):
         """
         Pick the next word in the generated text
         :param probabilities: Probabilites of the next word
-        :param int_to_vocab: Dictionary of word ids as the keys and words as the values
         :return: String of the predicted word
         """
-
+        probabilities = np.log(probabilities) / self.config.temperature
+        exp_probs = np.exp(probabilities)
+        probabilities = exp_probs / np.sum(exp_probs)
         pick = np.random.choice(len(probabilities), p=probabilities)
 
         return self.idx2word[pick]
 
     def generate(self):
-        prime_word = 'rick'
-        gen_length = 20
+        prime_word = 'morty:'
+        gen_length = 100
         saver = tf.train.Saver()
 
         with tf.Session() as sess:
             # Load saved model
             saver.restore(sess, self.config.load_model)
-            # loader = tf.train.import_meta_graph('./train/model.ckpt.meta')
-            # loader.restore(sess, './train/model.ckpt')
 
-            # Sentences generation setup
             gen_sentences = [prime_word]
             prev_state = sess.run(self.feed_dict['initial_state'], {self.feed_dict['input_text']: np.array([[1]])})
 
@@ -166,28 +154,12 @@ class TranscriptNet:
                 gen_sentences.append(pred_word)
 
             # Remove tokens
-            token_dict = {';': "<semicolon>",
-                          ':': "<colon>",
-                          "'": "<inverted_comma>",
-                          '"': "<quotation_mark>",
-                          ',': "<comma>",
-                          '\n': "<new_line>",
-                          '!': "<exclamation_mark>",
-                          '-': "<hyphen>",
-                          '--': "<hyphens>",
-                          '.': "<period>",
-                          '?': "<question_mark>",
-                          '(': "<left_paren>",
-                          ')': "<right_paren>",
-                          '♪': "<music_note>",
-                          '[': "<left_square>",
-                          ']': "<right_square>",
-                          }
+            token_dict = utils.token_lookup()
             tv_script = ' '.join(gen_sentences)
             for key, token in token_dict.items():
-                ending = ' ' if key in ['\n', '(', '"'] else ''
                 tv_script = tv_script.replace(' ' + token.lower(), key)
             tv_script = tv_script.replace('\n ', '\n')
             tv_script = tv_script.replace('( ', '(')
+            tv_script = tv_script.replace("' ", "'")
             print()
             print(tv_script)
