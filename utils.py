@@ -54,16 +54,15 @@ def preprocess(data_path):
     :param data_path: path to text file containing data
     :return: text sequences converted to integer sequence
     """
+    processed = []
     with open(data_path, "r") as in_file:
-        text = in_file.readlines()
-    for t in text:
-        print(t)
-    # tokens, word2idx, idx2word = build_vocab(text)
-    # text_seq = [word2idx[word] for word in tokens]
-    # data = {'word2idx': word2idx, 'idx2word': idx2word}
-    # pickle.dump(data, open('preprocessed_data.pkl', 'wb'))
-    # print("\nWordMap successfully stored as preprocessed_data.pkl")
-    # return text_seq
+        text = in_file.read()
+    tokens, word2idx, idx2word = build_vocab(text)
+    text_seq = [word2idx[word] for word in tokens]
+    data = {'word2idx': word2idx, 'idx2word': idx2word}
+    pickle.dump(data, open('preprocessed_data.pkl', 'wb'))
+    print("\nWordMap successfully stored as preprocessed_data.pkl")
+    return text_seq
 
 
 def load_data(data_path):

@@ -1,3 +1,5 @@
+import os
+import sys
 import numpy as np
 import tensorflow as tf
 import utils
@@ -6,11 +8,11 @@ import utils
 class TranscriptNet:
     def __init__(self, config):
         self.config = config
-        self.word2idx, self.idx2word = utils.load_data('preprocessed_data.pkl')
-        self.vocab_size = len(self.word2idx) + 1
-        self._build_model()
+        self.word2idx = None
+        self.idx2word = None
+        self.vocab_size = None
 
-    def _build_model(self):
+    def __build_model(self):
 
         with tf.variable_scope('TranscriptNet'):
             if self.config.mode in 'test':
@@ -18,10 +20,10 @@ class TranscriptNet:
 
             input_text = tf.placeholder(tf.int32, [None, None], name='input')
             targets = tf.placeholder(tf.int32, [None, None], name='targets')
-            learning_rate = tf.placeholder(tf.float32, name='learning_rate')
             keep_prob = tf.placeholder_with_default(1.0, shape=(), name='keep_prob')
 
             embedding = tf.Variable(tf.random_uniform((self.vocab_size, self.config.embed_size), -1, 1))
+            embedding = tf.nn.dropout(embedding, keep_prob=keep_prob, noise_shape=[self.vocab_size, 1])
             embed = tf.nn.embedding_lookup(embedding, input_text)
 
             lstm = tf.contrib.rnn.BasicLSTMCell(self.config.lstm_size)
@@ -42,7 +44,6 @@ class TranscriptNet:
 
             self.feed_dict = {'input_text': input_text,
                               'targets': targets,
-                              'learning_rate': learning_rate,
                               'keep_prob': keep_prob,
                               'initial_state': initial_state_named,
                               'final_state': final_state_named,
@@ -50,7 +51,7 @@ class TranscriptNet:
                               'probabilities': probabilities
                               }
 
-    def get_batches(self, text_seq):
+    def __get_batches(self, text_seq):
         """
         Return batches of input and target
         :param text_seq: Text with the words replaced by their ids
@@ -64,8 +65,8 @@ class TranscriptNet:
         for batch in range(0, num_batches):
             for sequence in range(0, self.config.batch_size):
                 index = batch * self.config.seq_length + sequence * block_size
-                batches[batch, 0, sequence,] = text_seq[index:index + self.config.seq_length]
-                batches[batch, 1, sequence,] = text_seq[index + 1:index + self.config.seq_length + 1]
+                batches[batch, 0, sequence] = text_seq[index:index + self.config.seq_length]
+                batches[batch, 1, sequence] = text_seq[index + 1:index + self.config.seq_length + 1]
 
         return batches
 
@@ -73,47 +74,92 @@ class TranscriptNet:
         """
         Builds the cost function and optimizer and trains the model on the training data
         """
+        current_epoch = 0
+        current_step = 0
+        if self.config.resume:
+            if os.path.isfile(os.path.join(self.config.train_dir, 'save.npy')):
+                current_epoch, current_step = np.load(os.path.join(self.config.train_dir, 'save.npy'))
+            else:
+                print("\nNo checkpoints, initializing training...\n")
+                self.config.resume = False
 
-        cost = tf.contrib.seq2seq.sequence_loss(self.feed_dict['predictions'],
-                                                self.feed_dict['targets'],
-                                                tf.ones([self.config.batch_size,
-                                                         tf.shape(self.feed_dict['input_text'])[1]]))
+        self.word2idx, self.idx2word = utils.load_data('preprocessed_data.pkl')
+        self.vocab_size = len(self.word2idx)
 
-        optimizer = tf.train.AdamOptimizer(self.feed_dict['learning_rate'])
+        self.__build_model()
 
-        gradients = optimizer.compute_gradients(cost)
-        capped_gradients = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gradients if grad is not None]
-        train_op = optimizer.apply_gradients(capped_gradients)
+        with tf.variable_scope('Loss'):
+            cost = tf.contrib.seq2seq.sequence_loss(self.feed_dict['predictions'],
+                                                    self.feed_dict['targets'],
+                                                    tf.ones([self.config.batch_size,
+                                                             tf.shape(self.feed_dict['input_text'])[1]]))
 
-        batches = self.get_batches(text_seq)
+        global_step = tf.Variable(current_step, name='global_step', dtype=tf.int64)
+
+        with tf.variable_scope('Optimizer'):
+            starter_learning_rate = self.config.learning_rate
+            learning_rate = tf.train.exponential_decay(
+                starter_learning_rate, global_step, 100, 0.95, staircase=True)
+            optimizer = tf.train.AdamOptimizer(learning_rate)
+
+            gradients = optimizer.compute_gradients(cost)
+            capped_gradients = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gradients if grad is not None]
+            train_op = optimizer.apply_gradients(capped_gradients, global_step=global_step)
+
+        batches = self.__get_batches(text_seq)
+
+        train_summary = tf.summary.scalar('train_loss', cost)
+        saver = tf.train.Saver()
 
         with tf.Session() as sess:
+            writer = tf.summary.FileWriter(self.config.log_dir, graph=sess.graph)
             sess.run(tf.global_variables_initializer())
 
-            for epoch in range(self.config.epochs):
+            if self.config.resume:
+                print("\nLoading previously trained model...")
+                print(current_epoch, "out of", self.config.epochs, "epochs completed in previous run.")
+                try:
+                    ckpt_file = os.path.join(self.config.train_dir, "model.ckpt-" + str(current_step))
+                    saver.restore(sess, ckpt_file)
+                    print("\nResuming training...\n")
+                except Exception as e:
+                    print(e)
+                    print("\nCheckpoint not found, initializing training.\n")
+                    sys.exit(-1)
+
+            for epoch in range(current_epoch, self.config.epochs):
                 state = sess.run(self.feed_dict['initial_state'], {self.feed_dict['input_text']: batches[0][0]})
 
                 for batch, (x, y) in enumerate(batches):
                     feed = {self.feed_dict['input_text']: x,
                             self.feed_dict['targets']: y,
                             self.feed_dict['initial_state']: state,
-                            self.feed_dict['learning_rate']: self.config.learning_rate,
-                            self.feed_dict['keep_prob']: 0.5
+                            self.feed_dict['keep_prob']: 1.0 - self.config.dropout
                             }
-                    train_loss, state, _ = sess.run([cost, self.feed_dict['final_state'], train_op], feed)
+                    run = [global_step, cost, self.feed_dict['final_state'], train_op, train_summary]
+                    step, train_loss, state, _, train_summ = sess.run(run, feed)
 
-                    print('Epoch {}: Step {:>4}/{}   train_loss = {:.3f}'.format(
+                    if step % 10 == 0:
+                        writer.add_summary(train_summ, step)
+                        writer.flush()
+
+                    print('{}: Step {} : Batch {}/{} : train_loss = {:.3f}'.format(
                         epoch,
+                        step,
                         batch,
                         len(batches),
                         train_loss))
 
-            # Save Model
-            saver = tf.train.Saver()
-            saver.save(sess, self.config.train_dir)
-            print('Model Trained and Saved')
+                    if step % self.config.checkpoint_step == 0 and step:
+                        print("Saving Model...")
+                        saver.save(sess, os.path.join(self.config.train_dir, "model.ckpt"), global_step=step)
+                        np.save(os.path.join(self.config.train_dir, "save"), (epoch, step))
 
-    def pick_word(self, probabilities):
+            # Save Model
+            saver.save(sess, self.config.train_dir)
+            print('Model Trained and saved')
+
+    def __pick_word(self, probabilities):
         """
         Pick the next word in the generated text
         :param probabilities: Probabilites of the next word
@@ -123,12 +169,16 @@ class TranscriptNet:
         exp_probs = np.exp(probabilities)
         probabilities = exp_probs / np.sum(exp_probs)
         pick = np.random.choice(len(probabilities), p=probabilities)
-
         return self.idx2word[pick]
 
     def generate(self):
-        prime_word = 'morty:'
-        gen_length = 100
+        self.word2idx, self.idx2word = utils.load_data('preprocessed_data.pkl')
+        self.vocab_size = len(self.word2idx)
+
+        self.__build_model()
+
+        prime_word = 'rick:'
+        gen_length = self.config.seq_length
         saver = tf.train.Saver()
 
         with tf.Session() as sess:
@@ -149,7 +199,7 @@ class TranscriptNet:
                     [self.feed_dict['probabilities'], self.feed_dict['final_state']],
                     {self.feed_dict['input_text']: dyn_input, self.feed_dict['initial_state']: prev_state})
 
-                pred_word = self.pick_word(probabilities[0][dyn_seq_length - 1])
+                pred_word = self.__pick_word(probabilities[0][dyn_seq_length - 1])
 
                 gen_sentences.append(pred_word)
 
