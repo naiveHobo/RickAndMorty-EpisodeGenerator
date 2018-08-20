@@ -73,6 +73,7 @@ class TranscriptNet:
     def train(self, text_seq):
         """
         Builds the cost function and optimizer and trains the model on the training data
+        :param text_seq: training data which contains text sequence converted to integers
         """
         current_epoch = 0
         current_step = 0
@@ -83,7 +84,7 @@ class TranscriptNet:
                 print("\nNo checkpoints, initializing training...\n")
                 self.config.resume = False
 
-        self.word2idx, self.idx2word = utils.load_data('preprocessed_data.pkl')
+        self.word2idx, self.idx2word = utils.load_vocab('preprocessed_data.pkl')
         self.vocab_size = len(self.word2idx)
 
         self.__build_model()
@@ -156,8 +157,8 @@ class TranscriptNet:
                         np.save(os.path.join(self.config.train_dir, "save"), (epoch, step))
 
             # Save Model
-            saver.save(sess, self.config.train_dir)
-            print('Model Trained and saved')
+            saver.save(sess, self.config.load_model)
+            print('Model Trained and saved as {}'.format(self.config.load_model))
 
     def __pick_word(self, probabilities):
         """
@@ -172,7 +173,11 @@ class TranscriptNet:
         return self.idx2word[pick]
 
     def generate(self):
-        self.word2idx, self.idx2word = utils.load_data('preprocessed_data.pkl')
+        """
+        Generates a Rick and Morty transcript starting from some seed word
+        :return: transcript in str format
+        """
+        self.word2idx, self.idx2word = utils.load_vocab('preprocessed_data.pkl')
         self.vocab_size = len(self.word2idx)
 
         self.__build_model()
@@ -205,11 +210,12 @@ class TranscriptNet:
 
             # Remove tokens
             token_dict = utils.token_lookup()
-            tv_script = ' '.join(gen_sentences)
+            script = ' '.join(gen_sentences)
             for key, token in token_dict.items():
-                tv_script = tv_script.replace(' ' + token.lower(), key)
-            tv_script = tv_script.replace('\n ', '\n')
-            tv_script = tv_script.replace('( ', '(')
-            tv_script = tv_script.replace("' ", "'")
+                script = script.replace(' ' + token.lower(), key)
+            script = script.replace('\n ', '\n')
+            script = script.replace('( ', '(')
+            script = script.replace("' ", "'")
             print()
-            print(tv_script)
+            print(script)
+            return script

@@ -9,7 +9,7 @@ ap.add_argument("--mode", required=True, type=str, help="train|test",
                 choices=["train", "test"])
 ap.add_argument("--train_dir", default="./train",
                 help="path to the directory where trained model is to be stored")
-ap.add_argument("--load_model", default="./train/model.ckpt",
+ap.add_argument("--load_model", default="./model/TranscriptNet",
                 help="path to trained model")
 ap.add_argument("--data_path", default="./data/rick_and_morty.txt",
                 help="path to text file where the data is stored")
@@ -43,7 +43,8 @@ args = ap.parse_args()
 model = TranscriptNet(args)
 
 if args.mode == "train":
-    text_seq = utils.preprocess(args.data_path)
+    text = utils.load_data(args.data_path)
+    text_seq = utils.preprocess(text)
     model.train(text_seq)
 else:
     model.generate()

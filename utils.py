@@ -15,7 +15,7 @@ def build_vocab(text):
         text = text.replace(key, ' {} '.format(token)).strip()
     while '  ' in text:
         text = text.replace('  ', ' ')
-    pat_alphabetic = re.compile('(([\d\w\<\>\_\:])+)')
+    pat_alphabetic = re.compile('(([\d\w<>_:])+)')
     tokens = [match.group() for match in pat_alphabetic.finditer(text)]
     vocab = {token: True for token in tokens}
     vocab = list(vocab)
@@ -47,16 +47,13 @@ def token_lookup():
             }
 
 
-def preprocess(data_path):
+def preprocess(text):
     """
-    Loads data and preprocesses it to produce vocabulary, converts
+    Preprocesses text data to produce vocabulary, converts
     text to integer sequences and saves everything as pickled file
-    :param data_path: path to text file containing data
+    :param text: text data to build vocabulary
     :return: text sequences converted to integer sequence
     """
-    processed = []
-    with open(data_path, "r") as in_file:
-        text = in_file.read()
     tokens, word2idx, idx2word = build_vocab(text)
     text_seq = [word2idx[word] for word in tokens]
     data = {'word2idx': word2idx, 'idx2word': idx2word}
@@ -65,7 +62,7 @@ def preprocess(data_path):
     return text_seq
 
 
-def load_data(data_path):
+def load_vocab(data_path):
     """
     Loads pickled WordMap data
     :param data_path: path to pickled wordmap file
@@ -74,3 +71,18 @@ def load_data(data_path):
     with open(data_path, 'rb') as pkl_file:
         data = pickle.load(pkl_file)
     return data['word2idx'], data['idx2word']
+
+
+def load_data(data_path):
+    """
+    Loads data from text file
+    :param data_path: path to text file
+    :return: text data from file
+    """
+    with open(data_path, "r") as in_file:
+        text = in_file.read()
+    return text
+
+
+def word2vec(text):
+    pass
