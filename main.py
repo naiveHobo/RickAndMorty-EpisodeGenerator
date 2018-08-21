@@ -37,14 +37,15 @@ ap.add_argument("--dropout", type=float, default=0.3,
                 help="dropout rate")
 ap.add_argument("--resume", action="store_true",
                 help="resume training from last checkpoint")
+ap.add_argument("--word2vec", action="store_true",
+                help="train word2vec embeddings on data and use for training instead of doing it from scratch")
 
 args = ap.parse_args()
 
 model = TranscriptNet(args)
 
 if args.mode == "train":
-    text = utils.load_data(args.data_path)
-    text_seq = utils.preprocess(text)
-    model.train(text_seq)
+    text = utils.load_text(args.data_path)
+    model.train(text)
 else:
     model.generate()
