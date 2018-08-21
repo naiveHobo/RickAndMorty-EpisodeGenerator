@@ -183,6 +183,8 @@ class TranscriptNet:
                         saver.save(sess, os.path.join(self.config.train_dir, "model.ckpt"), global_step=step)
                         np.save(os.path.join(self.config.train_dir, "save"), (epoch, step))
 
+                np.random.shuffle(batches)
+
             # Save Model
             saver.save(sess, self.config.load_model)
             print('Model Trained and saved as {}'.format(self.config.load_model))
